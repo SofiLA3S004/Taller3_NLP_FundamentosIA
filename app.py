@@ -26,6 +26,15 @@ def map_label_to_polarity(label: str):
     else:
         return "Positivo", (stars - 3) / 2.0  # 0..1 dentro de positivo
 
+
+def validate_dataset_columns(df: pd.DataFrame):
+    # Requeridos mínimos: 'text' (o 'comment') y 'user_id' y 'timestamp'
+    cols = set([c.lower() for c in df.columns])
+    has_text = ('text' in cols) or ('comment' in cols)
+    has_user = 'user_id' in cols
+    has_time = 'timestamp' in cols
+    return has_text and has_user and has_time
+
 st.sidebar.header("Entrada de datos")
 mode = st.sidebar.radio("Seleccione modo de entrada", ["Pegar texto", "Cargar CSV", "Demo"], index=2)
 
@@ -47,42 +56,69 @@ if mode == "Pegar texto":
             st.warning("Ingrese al menos un comentario.")
 
 elif mode == "Cargar CSV":
-    st.subheader("Cargar CSV con columnas 'comment' (obligatoria) y opcionalmente 'author'")
+    st.subheader("Cargar CSV con columnas 'user_id','text' (o 'comment'), 'timestamp' y métricas opcionales")
     file = st.file_uploader("Seleccionar CSV", type=["csv"])
     if file is not None:
         data = pd.read_csv(file)
-        if "comment" not in data.columns:
-            st.error("El CSV debe contener una columna 'comment'.")
+        if not validate_dataset_columns(data):
+            st.error("El CSV debe contener al menos las columnas 'user_id', 'timestamp' y 'text' (o 'comment').")
         else:
             if st.button("Analizar CSV"):
+                # Normalizar columna 'comment' -> 'text'
+                if 'comment' in data.columns and 'text' not in data.columns:
+                    data = data.rename(columns={'comment': 'text'})
+                texts = data['text'].astype(str).tolist()
                 clf = load_model()
-                preds = clf(data["comment"].astype(str).tolist())
+                preds = clf(texts)
                 rows = []
-                for c, p in zip(data["comment"].astype(str).tolist(), preds):
+                for idx, (c, p) in enumerate(zip(texts, preds)):
                     pol, strength = map_label_to_polarity(p["label"])
-                    rows.append({
-                        **({ "author": None } if "author" not in data.columns else {}),
-                        "comment": c,
+                    row = {
+                        "user_id": data.get('user_id', [None]*len(data))[idx],
+                        "text": c,
+                        "timestamp": data.get('timestamp', [None]*len(data))[idx],
                         "label_raw": p["label"],
                         "score_raw": p["score"],
                         "polarity": pol,
                         "strength": strength
-                    })
+                    }
+                    for m in ('likes','replies','shares'):
+                        if m in data.columns:
+                            row[m] = data[m].iloc[idx]
+                    rows.append(row)
                 df = pd.DataFrame(rows)
-                if "author" in data.columns:
-                    df["author"] = data["author"]
                 st.session_state["df"] = df
 
 else:
     st.subheader("Demo con datos de ejemplo")
-    demo_df = pd.read_csv("data/sample_comments.csv")
-    if st.button("Analizar demo"):
+    try:
+        demo_df = pd.read_csv("data/comments_clean.csv")
+    except Exception as e:
+        st.error(f"No se pudo leer demo CSV: {e}")
+        demo_df = None
+
+    if demo_df is not None and st.button("Analizar demo"):
+        if 'comment' in demo_df.columns and 'text' not in demo_df.columns:
+            demo_df = demo_df.rename(columns={'comment': 'text'})
+        texts = demo_df['text'].astype(str).tolist()
         clf = load_model()
-        preds = clf(demo_df["comment"].tolist())
+        preds = clf(texts)
         rows = []
-        for c, p, a in zip(demo_df["comment"].tolist(), preds, demo_df.get("author", [None]*len(demo_df))):
+        for idx, (c, p) in enumerate(zip(texts, preds)):
             pol, strength = map_label_to_polarity(p["label"])
-            rows.append({"author": a, "comment": c, "label_raw": p["label"], "score_raw": p["score"], "polarity": pol, "strength": strength})
+            row = {
+                "user_id": demo_df.get('user_id', [None]*len(demo_df))[idx],
+                "text": c,
+                "timestamp": demo_df.get('timestamp', [None]*len(demo_df))[idx],
+                "label_raw": p["label"],
+                "score_raw": p["score"],
+                "polarity": pol,
+                "strength": strength
+            }
+            for m in ('likes','replies','shares'):
+                if m in demo_df.columns:
+                    row[m] = demo_df[m].iloc[idx]
+            rows.append(row)
         st.session_state["df"] = pd.DataFrame(rows)
 
 df = st.session_state.get("df")
@@ -97,6 +133,24 @@ if df is not None and not df.empty:
 
     with st.expander("Ver tabla de resultados"):
         st.dataframe(df, use_container_width=True)
+
+    # Normalizar: si tenemos 'text' pero no 'comment', crear 'comment' para compatibilidad con visualizaciones previas
+    if 'text' in df.columns and 'comment' not in df.columns:
+        df['comment'] = df['text']
+
+    # Métricas de engagement si están disponibles
+    metric_cols = [c for c in ('likes','replies','shares') if c in df.columns]
+    if metric_cols:
+        mcol1, mcol2, mcol3 = st.columns(3)
+        if 'likes' in df.columns:
+            mcol1.metric("Total likes", int(df['likes'].fillna(0).sum()))
+            mcol1.metric("Likes promedio", round(float(df['likes'].fillna(0).mean()),1))
+        if 'replies' in df.columns:
+            mcol2.metric("Total replies", int(df['replies'].fillna(0).sum()))
+            mcol2.metric("Replies promedio", round(float(df['replies'].fillna(0).mean()),1))
+        if 'shares' in df.columns:
+            mcol3.metric("Total shares", int(df['shares'].fillna(0).sum()))
+            mcol3.metric("Shares promedio", round(float(df['shares'].fillna(0).mean()),1))
 
     # Gráficos Plotly
     counts = df["polarity"].value_counts().reset_index()
