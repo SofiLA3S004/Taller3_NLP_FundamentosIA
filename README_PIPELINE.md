@@ -1,7 +1,7 @@
 **Pipeline: Extracción de features por usuario**
 
-- **Input**: `data/comments_clean.csv` (columnas mínimas: `user_id`, `text` o `comment`, `timestamp`; opcionales: `likes`, `replies`, `shares`)
-- **Output**: `data/user_features.csv` (cada fila = un `user_id` con features agregados)
+- **Input**: Uno o más archivos CSV (columnas mínimas: `user_id`, `text` o `comment`, `timestamp`; opcionales: `likes`, `replies`, `shares`). Los múltiples archivos se combinan en un solo dataset.
+- **Output**: Un único archivo CSV `data/user_features.csv` (cada fila = un `user_id` con features agregados)
 
 Pasos del pipeline:
 - Preprocesamiento: limpieza básica (URLs, mentions, exceso de espacios), normalización y tokenización.
@@ -20,8 +20,14 @@ pip install -r requirements.txt
 
 2. Ejecutar el pipeline:
 
+Con un solo archivo de entrada:
 ```powershell
 python scripts/pipeline.py --input data/comments_clean.csv --output data/user_features.csv
+```
+
+Con múltiples archivos de entrada (se combinarán en un solo dataset):
+```powershell
+python scripts/pipeline.py --input data/export_20251120-175026.csv data/export_20251120-235652.csv data/export_20251121-000802.csv --output data/user_features.csv
 ```
 
 Notas:

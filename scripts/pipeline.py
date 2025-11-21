@@ -9,10 +9,11 @@ Funciones:
   - Léxicos: longitud promedio, tokens promedio, Type-Token Ratio (TTR), repetición de frases (duplicados y n-grams repetidos).
   - Semánticos: embeddings por publicación con Sentence-BERT (all-MiniLM-L6-v2) y agregación por usuario (media, norma std).
 
-Salida: `data/user_features.csv` con características agregadas por `user_id`.
+Salida: Un único archivo CSV con características agregadas por `user_id` combinando todos los inputs.
 
 Uso:
     python scripts/pipeline.py --input data/comments_clean.csv --output data/user_features.csv
+    python scripts/pipeline.py --input data/file1.csv data/file2.csv data/file3.csv --output data/user_features.csv
 
 Requiere: sentence-transformers, nltk, pandas, scikit-learn, tqdm
 """
@@ -95,6 +96,7 @@ def aggregate_user_features(df: pd.DataFrame, embeddings, embed_dim: int):
         n_posts = len(g)
         # timestamps -> posts per day
         try:
+            # Usar 'timestamp' que ya fue mapeado desde 'Date' si existe
             times = pd.to_datetime(g['timestamp'])
             days_span = (times.max() - times.min()).days
             days_span = max(days_span, 1)
@@ -122,7 +124,7 @@ def aggregate_user_features(df: pd.DataFrame, embeddings, embed_dim: int):
         emb_std_norm = float(np.linalg.norm(emb_std))
 
         row = {
-            'user_id': user_id,
+            'user_id': user_id,  # Mantener user_id en output (que viene de Name)
             'n_posts': n_posts,
             'posts_per_day': float(posts_per_day),
             'total_likes': int(total_likes),
@@ -142,19 +144,48 @@ def aggregate_user_features(df: pd.DataFrame, embeddings, embed_dim: int):
     return pd.DataFrame(rows)
 
 
-def run(input_path: Path, output_path: Path, model_name: str = 'all-MiniLM-L6-v2', batch_size: int = 64):
-    print(f"Cargando datos desde {input_path}")
-    df = pd.read_csv(input_path)
+def run(input_paths: list[Path], output_path: Path, model_name: str = 'all-MiniLM-L6-v2', batch_size: int = 64):
+    # Cargar y combinar múltiples archivos de entrada
+    print(f"Cargando datos desde {len(input_paths)} archivo(s)...")
+    dfs = []
+    for input_path in input_paths:
+        print(f"  - Leyendo {input_path}")
+        df = pd.read_csv(input_path)
+        # Eliminar columnas completamente vacías (Unnamed)
+        df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+        dfs.append(df)
+    
+    # Combinar todos los DataFrames
+    df = pd.concat(dfs, ignore_index=True)
+    print(f"Total de registros combinados: {len(df)}")
+    
     # Preprocesamiento básico
     print("Aplicando limpieza básica de texto...")
-    df['text'] = df.get('text', df.get('comment', pd.Series(['']*len(df))))
+    # Mapear columnas: Comment -> text, Name -> user_id (para compatibilidad interna)
+    if 'Comment' in df.columns and 'text' not in df.columns:
+        df['text'] = df['Comment']
+    elif 'comment' in df.columns and 'text' not in df.columns:
+        df['text'] = df['comment']
+    elif 'text' not in df.columns:
+        raise ValueError('El CSV debe contener una columna de texto: "Comment", "comment" o "text"')
+    
     df['text'] = df['text'].astype(str).apply(basic_clean)
 
-    # asegurar user_id y timestamp
-    if 'user_id' not in df.columns:
-        raise ValueError('El CSV debe contener la columna user_id')
-    if 'timestamp' not in df.columns:
-        print('Advertencia: no se encontró timestamp; ciertas métricas de frecuencia se basarán en conteos simples')
+    # Mapear columnas de usuario y fecha
+    if 'Name' in df.columns:
+        df['user_id'] = df['Name']  # Usar Name como user_id internamente
+    elif 'user_id' not in df.columns:
+        raise ValueError('El CSV debe contener la columna "Name" o "user_id"')
+    
+    # Mapear fecha
+    if 'Date' in df.columns:
+        df['timestamp'] = df['Date']
+    elif 'timestamp' not in df.columns:
+        print('Advertencia: no se encontró "Date" ni "timestamp"; ciertas métricas de frecuencia se basarán en conteos simples')
+    
+    # Mapear Likes (con mayúscula)
+    if 'Likes' in df.columns and 'likes' not in df.columns:
+        df['likes'] = df['Likes']
 
     # Embeddings
     print(f"Cargando modelo de embeddings {model_name}...")
@@ -187,13 +218,17 @@ def ensure_nltk():
 
 def main():
     parser = argparse.ArgumentParser(description='Pipeline de features por usuario')
-    parser.add_argument('--input', type=str, default='data/cleaned_comments.csv')
-    parser.add_argument('--output', type=str, default='data/user_features.csv')
-    parser.add_argument('--model', type=str, default='all-MiniLM-L6-v2')
+    parser.add_argument('--input', type=str, nargs='+', default=['data/cleaned_comments.csv'],
+                        help='Uno o más archivos CSV de entrada. Se combinarán en un solo dataset.')
+    parser.add_argument('--output', type=str, default='data/user_features.csv',
+                        help='Archivo CSV de salida con features agregadas por user_id')
+    parser.add_argument('--model', type=str, default='all-MiniLM-L6-v2',
+                        help='Nombre del modelo de Sentence-BERT a usar')
     args = parser.parse_args()
 
     ensure_nltk()
-    run(Path(args.input), Path(args.output), model_name=args.model)
+    input_paths = [Path(p) for p in args.input]
+    run(input_paths, Path(args.output), model_name=args.model)
 
 
 if __name__ == '__main__':
