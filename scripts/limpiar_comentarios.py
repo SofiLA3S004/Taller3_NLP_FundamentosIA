@@ -2,8 +2,12 @@
 """
 Script para limpiar archivos CSV de comentarios.
 
-Extrae solo las columnas: Name, Comment, Date, Likes
-de los archivos CSV en la carpeta data/, limpia emojis y combina todo en un único CSV.
+Extrae las columnas: Name, Comment, Date, Likes
+de los archivos CSV en la carpeta data/, limpia emojis, asigna video_id por archivo
+y combina todo en un único CSV.
+
+El video_id se asigna por archivo: todos los comentarios del primer archivo tienen video_id=0,
+del segundo archivo video_id=1, etc.
 
 Uso:
     python scripts/limpiar_comentarios.py
@@ -80,13 +84,14 @@ def procesar_archivo(input_file: Path):
         
         # Verificar que existan las columnas necesarias
         columnas_requeridas = ['Name', 'Comment', 'Date', 'Likes']
+        # Comment URL es opcional, solo la usamos para referencia pero no la guardamos
         columnas_faltantes = [col for col in columnas_requeridas if col not in df.columns]
         
         if columnas_faltantes:
             print(f"    [ADVERTENCIA] Faltan columnas {columnas_faltantes} en {input_file.name}")
             return None
         
-        # Extraer solo las columnas necesarias
+        # Extraer solo las columnas necesarias (Comment URL no se incluye en el output final)
         df_limpio = df[columnas_requeridas].copy()
         
         # Eliminar filas completamente vacías
@@ -132,14 +137,20 @@ def main():
     print(f"Encontrados {len(archivos)} archivo(s) para procesar\n")
     
     # Procesar cada archivo y combinar los resultados
+    # Ordenar archivos para garantizar orden consistente
+    archivos = sorted(archivos)
+    
     dataframes = []
     exitosos = 0
     
-    for archivo in archivos:
+    for idx, archivo in enumerate(archivos):
         df_limpio = procesar_archivo(archivo)
         if df_limpio is not None:
+            # Asignar video_id basado en el índice del archivo (0, 1, 2, ...)
+            df_limpio['video_id'] = idx
             dataframes.append(df_limpio)
             exitosos += 1
+            print(f"    Asignado video_id = {idx} a {archivo.name}")
         print()
     
     if not dataframes:
@@ -157,6 +168,11 @@ def main():
     
     if filas_antes != filas_despues:
         print(f"  Eliminados {filas_antes - filas_despues} duplicados")
+    
+    # Eliminar la columna Comment URL si existe (ya no la necesitamos)
+    if 'Comment URL' in df_combinado.columns:
+        df_combinado = df_combinado.drop(columns=['Comment URL'])
+        print("  Columna 'Comment URL' eliminada")
     
     # Guardar el archivo combinado
     output_file.parent.mkdir(parents=True, exist_ok=True)
