@@ -302,8 +302,11 @@ if df is not None and not df.empty:
                         # Agregar columnas al dataframe principal
                         df['is_bot'] = df['user_id'].map(lambda x: bot_info_map.get(x, {}).get('is_bot', 0))
                         df['bot_probability'] = df['user_id'].map(lambda x: bot_info_map.get(x, {}).get('bot_probability', 0.0))
-                        df['is_bot'] = df['is_bot'].fillna(0).astype(int)
-                        df['bot_probability'] = df['bot_probability'].fillna(0.0)
+                        # Asegurar que los valores sean del tipo correcto
+                        if 'is_bot' in df.columns:
+                            df['is_bot'] = df['is_bot'].fillna(0).astype(int)
+                        if 'bot_probability' in df.columns:
+                            df['bot_probability'] = df['bot_probability'].fillna(0.0)
                         
                         # Actualizar session state con el dataframe actualizado
                         st.session_state["df"] = df
@@ -545,8 +548,11 @@ if df is not None and not df.empty:
         # Agregar información de bots al dataframe de exportación
         bot_info = bot_results_df[['user_id', 'bot_probability', 'is_bot']].copy()
         df_export = df_export.merge(bot_info, on='user_id', how='left')
-        df_export['is_bot'] = df_export['is_bot'].fillna(0).astype(int)
-        df_export['bot_probability'] = df_export['bot_probability'].fillna(0.0)
+        # Verificar que las columnas existan después del merge antes de procesarlas
+        if 'is_bot' in df_export.columns:
+            df_export['is_bot'] = df_export['is_bot'].fillna(0).astype(int)
+        if 'bot_probability' in df_export.columns:
+            df_export['bot_probability'] = df_export['bot_probability'].fillna(0.0)
     
     st.download_button("Descargar CSV de resultados", data=df_export.to_csv(index=False).encode("utf-8"), file_name="sentiment_results.csv", mime="text/csv")
 
