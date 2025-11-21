@@ -13,7 +13,7 @@ st.caption("Pegue comentarios de una noticia o cargue un CSV para analizar senti
 @st.cache_resource(show_spinner=False)
 def load_model():
     # Modelo multilingüe de 1-5 estrellas; lo convertimos a Pos/Neu/Neg
-    clf = pipeline("sentiment-analysis", model="nlptown/bert-base-multilingual-uncased-sentiment")
+    clf = pipeline("sentiment-analysis", model="dccuchile/tulio-chilean-spanish-bert")
     return clf
 
 def map_label_to_polarity(label: str):
